@@ -28,6 +28,7 @@ class PriceBar:
 
 @dataclass(frozen=True)
 class Genes:
+    trade_mode: int
     sma_short: int
     sma_long: int
     rsi_period: int
@@ -50,6 +51,7 @@ class Genes:
 
 @dataclass
 class Trade:
+    side: str
     entry_date: str
     exit_date: str
     entry_price: float
@@ -66,6 +68,8 @@ class BacktestResult:
     annual_return: float
     max_drawdown: float
     trades: int
+    long_trades: int
+    short_trades: int
     win_rate: float
     profit_factor: float
     average_trade_return: float
@@ -343,6 +347,7 @@ def clamp(value: float, low: float, high: float) -> float:
 
 
 def normalize_genes(genes: Genes) -> Genes:
+    trade_mode = int(clamp(round(genes.trade_mode), 0, 1))
     sma_short = int(clamp(round(genes.sma_short), 3, 60))
     sma_long = int(clamp(round(genes.sma_long), sma_short + 5, 220))
     rsi_period = int(clamp(round(genes.rsi_period), 5, 40))
@@ -362,6 +367,7 @@ def normalize_genes(genes: Genes) -> Genes:
     take_profit = clamp(genes.take_profit, 0.005, 0.25)
     max_hold_days = int(clamp(round(genes.max_hold_days), 2, 90))
     return Genes(
+        trade_mode=trade_mode,
         sma_short=sma_short,
         sma_long=sma_long,
         rsi_period=rsi_period,
@@ -394,6 +400,7 @@ def random_genes(rng: random.Random) -> Genes:
     macd_slow = rng.randint(macd_fast + 5, 70)
     return normalize_genes(
         Genes(
+            trade_mode=rng.choice([0, 1]),
             sma_short=sma_short,
             sma_long=sma_long,
             rsi_period=rng.randint(5, 30),
@@ -479,6 +486,7 @@ def backtest(
     min_trades: int = 1,
     max_trades: int | None = None,
     excess_trade_penalty: float = 0.002,
+    benchmark_weight: float = 0.35,
 ) -> BacktestResult:
     if trade_start_index < 0 or trade_start_index >= len(bars):
         raise ValueError("trade_start_index fora do intervalo de barras.")
@@ -494,6 +502,8 @@ def backtest(
 
     cash = initial_capital
     units = 0.0
+    position_side = 0
+    position_capital = 0.0
     entry_price = 0.0
     entry_atr = 0.0
     entry_index = 0
@@ -501,6 +511,48 @@ def backtest(
     days_in_market = 0
     trades: list[Trade] = []
     equity_curve: list[float] = []
+
+    def position_equity(price: float) -> float:
+        if position_side == 1:
+            return units * price
+        if position_side == -1 and entry_price > 0.0:
+            return max(0.0, position_capital * (2.0 - (price / entry_price)))
+        return cash
+
+    def open_position(side: int, bar: PriceBar, atr_value: float, index: int) -> None:
+        nonlocal cash, units, position_side, position_capital, entry_price, entry_atr, entry_index, entry_date
+        position_capital = cash * (1.0 - transaction_cost)
+        units = position_capital / bar.close
+        cash = 0.0
+        position_side = side
+        entry_price = bar.close
+        entry_atr = atr_value
+        entry_index = index
+        entry_date = bar.date
+
+    def close_position(bar: PriceBar, index: int, exit_reason: str) -> None:
+        nonlocal cash, units, position_side, position_capital, entry_price, entry_atr, entry_date
+        exit_equity = position_equity(bar.close)
+        cash = exit_equity * (1.0 - transaction_cost)
+        trade_return = (cash / position_capital) - 1.0 if position_capital > 0.0 else 0.0
+        trades.append(
+            Trade(
+                side="long" if position_side == 1 else "short",
+                entry_date=entry_date,
+                exit_date=bar.date,
+                entry_price=entry_price,
+                exit_price=bar.close,
+                return_pct=trade_return,
+                hold_days=index - entry_index,
+                exit_reason=exit_reason,
+            )
+        )
+        units = 0.0
+        position_side = 0
+        position_capital = 0.0
+        entry_price = 0.0
+        entry_atr = 0.0
+        entry_date = ""
 
     indicator_start_index = max(
         genes.sma_long,
@@ -512,7 +564,7 @@ def backtest(
     start_index = max(indicator_start_index, trade_start_index)
     for i, bar in enumerate(bars):
         price = bar.close
-        has_position = units > 0.0
+        has_position = position_side != 0
 
         if i >= start_index:
             short_value = sma_short[i]
@@ -551,7 +603,7 @@ def backtest(
                 )
                 if has_position:
                     days_in_market += 1
-                    current_return = (price / entry_price) - 1.0
+                    current_return = position_side * ((price / entry_price) - 1.0)
                     atr_stop = (entry_atr * genes.atr_stop_mult) / entry_price if entry_atr > 0 else genes.stop_loss
                     atr_take = (entry_atr * genes.atr_take_mult) / entry_price if entry_atr > 0 else genes.take_profit
                     effective_stop = min(genes.stop_loss, atr_stop)
@@ -563,55 +615,31 @@ def backtest(
                         exit_reason = "take_profit"
                     elif i - entry_index >= genes.max_hold_days:
                         exit_reason = "max_hold_days"
-                    elif bearish_signals >= genes.min_exit_signals:
+                    elif position_side == 1 and bearish_signals >= genes.min_exit_signals:
+                        exit_reason = "signal_exit"
+                    elif position_side == -1 and bullish_signals >= genes.min_exit_signals:
                         exit_reason = "signal_exit"
 
                     if exit_reason:
-                        cash = units * price * (1.0 - transaction_cost)
-                        trade_return = (cash / (units * entry_price)) - 1.0
-                        trades.append(
-                            Trade(
-                                entry_date=entry_date,
-                                exit_date=bar.date,
-                                entry_price=entry_price,
-                                exit_price=price,
-                                return_pct=trade_return,
-                                hold_days=i - entry_index,
-                                exit_reason=exit_reason,
-                            )
-                        )
-                        units = 0.0
-                        entry_price = 0.0
-                        entry_atr = 0.0
-                        entry_date = ""
+                        close_position(bar, i, exit_reason)
                 else:
-                    should_enter = bullish_signals >= genes.min_entry_signals
-                    if should_enter:
-                        units = (cash * (1.0 - transaction_cost)) / price
-                        cash = 0.0
-                        entry_price = price
-                        entry_atr = atr_value
-                        entry_index = i
-                        entry_date = bar.date
+                    should_enter_long = bullish_signals >= genes.min_entry_signals and bullish_signals > bearish_signals
+                    should_enter_short = (
+                        genes.trade_mode == 1
+                        and bearish_signals >= genes.min_entry_signals
+                        and bearish_signals > bullish_signals
+                    )
+                    if should_enter_long:
+                        open_position(1, bar, atr_value, i)
+                    elif should_enter_short:
+                        open_position(-1, bar, atr_value, i)
 
-        equity = cash + (units * price)
+        equity = position_equity(price) if position_side != 0 else cash
         equity_curve.append(equity)
 
-    if units > 0.0:
+    if position_side != 0:
         final_bar = bars[-1]
-        cash = units * final_bar.close * (1.0 - transaction_cost)
-        trade_return = (cash / (units * entry_price)) - 1.0
-        trades.append(
-            Trade(
-                entry_date=entry_date,
-                exit_date=final_bar.date,
-                entry_price=entry_price,
-                exit_price=final_bar.close,
-                return_pct=trade_return,
-                hold_days=len(bars) - 1 - entry_index,
-                exit_reason="end_of_data",
-            )
-        )
+        close_position(final_bar, len(bars) - 1, "end_of_data")
         equity_curve[-1] = cash
 
     metric_equity_curve = equity_curve[trade_start_index:]
@@ -622,6 +650,8 @@ def backtest(
     annual_return = (final_equity / initial_capital) ** (1.0 / years) - 1.0
     max_drawdown = calculate_max_drawdown(metric_equity_curve)
     wins = sum(1 for trade in trades if trade.return_pct > 0.0)
+    long_trades = sum(1 for trade in trades if trade.side == "long")
+    short_trades = sum(1 for trade in trades if trade.side == "short")
     win_rate = wins / len(trades) if trades else 0.0
     positive_returns = [trade.return_pct for trade in trades if trade.return_pct > 0.0]
     negative_returns = [trade.return_pct for trade in trades if trade.return_pct < 0.0]
@@ -639,6 +669,7 @@ def backtest(
     consistency_score = win_rate if trades else 0.0
 
     min_trades = max(0, min_trades)
+    benchmark_weight = max(0.0, benchmark_weight)
     excess_trades = max(0, len(trades) - max_trades) if max_trades is not None and max_trades > 0 else 0
     missing_trades = max(0, min_trades - len(trades))
     if missing_trades:
@@ -646,6 +677,7 @@ def backtest(
     else:
         fitness = (
             total_return
+            + (benchmark_weight * return_vs_buy_hold)
             - (drawdown_penalty * max_drawdown)
             - (trade_penalty * len(trades))
             - (excess_trade_penalty * excess_trades)
@@ -657,6 +689,8 @@ def backtest(
         annual_return=annual_return,
         max_drawdown=max_drawdown,
         trades=len(trades),
+        long_trades=long_trades,
+        short_trades=short_trades,
         win_rate=win_rate,
         profit_factor=profit_factor,
         average_trade_return=average_trade_return,
@@ -789,6 +823,7 @@ def evolve(
     min_trades: int = 1,
     max_trades: int | None = None,
     excess_trade_penalty: float = 0.002,
+    benchmark_weight: float = 0.35,
 ) -> tuple[Genes, BacktestResult]:
     rng = random.Random(seed)
     population = [random_genes(rng) for _ in range(population_size)]
@@ -807,6 +842,7 @@ def evolve(
                 min_trades=min_trades,
                 max_trades=max_trades,
                 excess_trade_penalty=excess_trade_penalty,
+                benchmark_weight=benchmark_weight,
             )
             return result, result, None, 0.0
 
@@ -820,6 +856,7 @@ def evolve(
             min_trades=min_trades,
             max_trades=max_trades,
             excess_trade_penalty=excess_trade_penalty,
+            benchmark_weight=benchmark_weight,
         )
         validation_result = backtest(
             train_bars,
@@ -832,6 +869,7 @@ def evolve(
             min_trades=min_trades,
             max_trades=max_trades,
             excess_trade_penalty=excess_trade_penalty,
+            benchmark_weight=benchmark_weight,
         )
         score, overfit_gap = robust_fitness(
             optimization_result=optimization_result,
@@ -925,6 +963,7 @@ def evolve(
         min_trades=min_trades,
         max_trades=max_trades,
         excess_trade_penalty=excess_trade_penalty,
+        benchmark_weight=benchmark_weight,
     )
     return best_genes, replace(full_train_result, fitness=best_result.fitness)
 
@@ -936,7 +975,9 @@ def split_train_test(bars: list[PriceBar], train_ratio: float) -> tuple[list[Pri
 
 
 def format_genes(genes: Genes) -> str:
+    mode = "long_short" if genes.trade_mode == 1 else "long_only"
     return (
+        f"trade_mode={mode}, "
         f"sma_short={genes.sma_short}, "
         f"sma_long={genes.sma_long}, "
         f"rsi_period={genes.rsi_period}, "
@@ -966,7 +1007,7 @@ def format_result(result: BacktestResult) -> str:
         f"vs_buy_and_hold={result.return_vs_buy_hold:.2%}\n"
         f"max_drawdown={result.max_drawdown:.2%}\n"
         f"retorno_por_drawdown={result.return_drawdown_ratio:.2f}\n"
-        f"trades={result.trades}\n"
+        f"trades={result.trades} | long={result.long_trades} | short={result.short_trades}\n"
         f"trades_por_ano={result.trades_per_year:.2f}\n"
         f"win_rate={result.win_rate:.2%}\n"
         f"consistencia={result.consistency_score:.2%}\n"
@@ -997,6 +1038,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transaction-cost", type=float, default=0.0005, help="Custo por ordem. 0.0005 = 0.05 pct.")
     parser.add_argument("--drawdown-penalty", type=float, default=1.5, help="Penalidade aplicada ao drawdown.")
     parser.add_argument("--trade-penalty", type=float, default=0.0005, help="Penalidade por trade executado.")
+    parser.add_argument("--benchmark-weight", type=float, default=0.35, help="Peso para premiar/penalizar retorno contra buy and hold.")
     parser.add_argument("--validation-ratio", type=float, default=0.2, help="Parte final do treino usada como validacao interna anti-overfitting.")
     parser.add_argument("--validation-weight", type=float, default=0.65, help="Peso da validacao interna na nota robusta.")
     parser.add_argument("--overfit-penalty", type=float, default=1.5, help="Penalidade quando treino supera validacao por margem grande.")
@@ -1042,6 +1084,7 @@ def main() -> None:
         min_trades=args.min_trades,
         max_trades=args.max_trades or None,
         excess_trade_penalty=args.excess_trade_penalty,
+        benchmark_weight=args.benchmark_weight,
     )
 
     test_result = backtest(
@@ -1054,6 +1097,7 @@ def main() -> None:
         min_trades=args.min_trades,
         max_trades=args.max_trades or None,
         excess_trade_penalty=args.excess_trade_penalty,
+        benchmark_weight=args.benchmark_weight,
     )
 
     print("\nMelhores genes encontrados:")

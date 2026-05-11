@@ -48,11 +48,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stop-loss", type=float, default=0.03, help="Stop loss. 0.03 = 3 pct.")
     parser.add_argument("--take-profit", type=float, default=0.08, help="Take profit. 0.08 = 8 pct.")
     parser.add_argument("--max-hold-days", type=int, default=20, help="Maximo de dias posicionado.")
+    parser.add_argument(
+        "--trade-mode",
+        choices=["long_only", "long_short"],
+        default="long_only",
+        help="long_only compra ou fica fora; long_short tambem permite operacoes vendidas.",
+    )
 
     parser.add_argument("--initial-capital", type=float, default=10_000.0, help="Capital inicial.")
     parser.add_argument("--transaction-cost", type=float, default=0.0005, help="Custo por ordem. 0.0005 = 0.05 pct.")
     parser.add_argument("--drawdown-penalty", type=float, default=1.5, help="Penalidade de drawdown usada no fitness.")
     parser.add_argument("--trade-penalty", type=float, default=0.0005, help="Penalidade por trade usada no fitness.")
+    parser.add_argument("--benchmark-weight", type=float, default=0.35, help="Peso para premiar/penalizar retorno contra buy and hold.")
     parser.add_argument("--export-dir", type=Path, default=Path("resultados"), help="Diretorio para CSVs de saida.")
     parser.add_argument("--no-export", action="store_true", help="Nao salvar trades/curva de capital em CSV.")
     return parser.parse_args()
@@ -74,6 +81,7 @@ def load_bars(args: argparse.Namespace):
 def build_genes(args: argparse.Namespace) -> Genes:
     return normalize_genes(
         Genes(
+            trade_mode=1 if args.trade_mode == "long_short" else 0,
             sma_short=args.sma_short,
             sma_long=args.sma_long,
             rsi_period=args.rsi_period,
@@ -102,6 +110,7 @@ def write_trades_csv(path: Path, result) -> None:
         writer.writerow(
             [
                 "entry_date",
+                "side",
                 "exit_date",
                 "entry_price",
                 "exit_price",
@@ -114,6 +123,7 @@ def write_trades_csv(path: Path, result) -> None:
             writer.writerow(
                 [
                     trade.entry_date,
+                    trade.side,
                     trade.exit_date,
                     f"{trade.entry_price:.6f}",
                     f"{trade.exit_price:.6f}",
@@ -147,6 +157,7 @@ def main() -> None:
         transaction_cost=args.transaction_cost,
         drawdown_penalty=args.drawdown_penalty,
         trade_penalty=args.trade_penalty,
+        benchmark_weight=args.benchmark_weight,
     )
 
     print(f"Fonte: {source}")

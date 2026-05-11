@@ -77,8 +77,10 @@ def parse_float(params: dict[str, list[str]], name: str, default: float, minimum
     return max(minimum, min(maximum, value))
 
 
-def genes_to_dict(genes: Genes) -> dict[str, int | float]:
+def genes_to_dict(genes: Genes) -> dict[str, int | float | str]:
     return {
+        "trade_mode": genes.trade_mode,
+        "trade_mode_label": "long_short" if genes.trade_mode == 1 else "long_only",
         "sma_short": genes.sma_short,
         "sma_long": genes.sma_long,
         "rsi_period": genes.rsi_period,
@@ -107,6 +109,8 @@ def result_to_dict(result: BacktestResult) -> dict[str, float | int | None]:
         "annual_return": finite_float(result.annual_return),
         "max_drawdown": finite_float(result.max_drawdown),
         "trades": result.trades,
+        "long_trades": result.long_trades,
+        "short_trades": result.short_trades,
         "win_rate": finite_float(result.win_rate),
         "profit_factor": finite_float(result.profit_factor),
         "average_trade_return": finite_float(result.average_trade_return),
@@ -136,6 +140,7 @@ def equity_series(bars: list[PriceBar], equity_curve: list[float]) -> list[dict[
 def trade_log(result: BacktestResult) -> list[dict[str, float | int | str]]:
     return [
         {
+            "side": trade.side,
             "entry_date": trade.entry_date,
             "exit_date": trade.exit_date,
             "entry_price": trade.entry_price,
@@ -182,6 +187,7 @@ def build_config_candidates(
     min_trades: int,
     max_trades: int | None,
     excess_trade_penalty: float,
+    benchmark_weight: float,
 ) -> list[dict[str, object]]:
     base_max_trades = max_trades or 30
     controlled = [
@@ -197,6 +203,7 @@ def build_config_candidates(
             "min_trades": min_trades,
             "max_trades": max_trades,
             "excess_trade_penalty": excess_trade_penalty,
+            "benchmark_weight": benchmark_weight,
         },
         {
             "name": "validacao_dura",
@@ -210,6 +217,7 @@ def build_config_candidates(
             "min_trades": max(2, min_trades),
             "max_trades": min(base_max_trades, 20),
             "excess_trade_penalty": max(excess_trade_penalty, 0.003),
+            "benchmark_weight": max(benchmark_weight, 0.45),
         },
         {
             "name": "mais_flexivel",
@@ -223,6 +231,7 @@ def build_config_candidates(
             "min_trades": max(1, min_trades - 1),
             "max_trades": max(base_max_trades, 40),
             "excess_trade_penalty": excess_trade_penalty,
+            "benchmark_weight": max(0.20, benchmark_weight - 0.10),
         },
         {
             "name": "poucos_trades",
@@ -236,6 +245,7 @@ def build_config_candidates(
             "min_trades": max(2, min_trades),
             "max_trades": min(base_max_trades, 15),
             "excess_trade_penalty": max(excess_trade_penalty, 0.004),
+            "benchmark_weight": max(benchmark_weight, 0.50),
         },
         {
             "name": "populacao_maior",
@@ -249,6 +259,7 @@ def build_config_candidates(
             "min_trades": min_trades,
             "max_trades": max_trades,
             "excess_trade_penalty": excess_trade_penalty,
+            "benchmark_weight": benchmark_weight,
         },
         {
             "name": "mais_geracoes",
@@ -262,6 +273,7 @@ def build_config_candidates(
             "min_trades": min_trades,
             "max_trades": max_trades,
             "excess_trade_penalty": excess_trade_penalty,
+            "benchmark_weight": max(benchmark_weight, 0.40),
         },
     ]
 
@@ -282,6 +294,7 @@ def build_config_candidates(
                 "min_trades": rng.choice([1, 2, 3]),
                 "max_trades": max_trade_choice,
                 "excess_trade_penalty": rng.choice([0.002, 0.003, 0.004]),
+                "benchmark_weight": rng.choice([0.25, 0.35, 0.45, 0.55]),
             }
         )
     return candidates
@@ -413,6 +426,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             transaction_cost = parse_float(params, "transaction_cost", 0.0005, 0.0, 0.05)
             drawdown_penalty = parse_float(params, "drawdown_penalty", 1.5, 0.0, 10.0)
             trade_penalty = parse_float(params, "trade_penalty", 0.0005, 0.0, 0.1)
+            benchmark_weight = parse_float(params, "benchmark_weight", 0.35, 0.0, 2.0)
             validation_ratio = parse_float(params, "validation_ratio", 0.2, 0.0, 0.5)
             validation_weight = parse_float(params, "validation_weight", 0.65, 0.0, 1.0)
             overfit_penalty = parse_float(params, "overfit_penalty", 1.5, 0.0, 10.0)
@@ -435,6 +449,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     transaction_cost=transaction_cost,
                     drawdown_penalty=drawdown_penalty,
                     trade_penalty=trade_penalty,
+                    benchmark_weight=benchmark_weight,
                     validation_ratio=validation_ratio,
                     validation_weight=validation_weight,
                     overfit_penalty=overfit_penalty,
@@ -458,6 +473,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     transaction_cost=transaction_cost,
                     drawdown_penalty=drawdown_penalty,
                     trade_penalty=trade_penalty,
+                    benchmark_weight=benchmark_weight,
                     validation_ratio=validation_ratio,
                     validation_weight=validation_weight,
                     overfit_penalty=overfit_penalty,
@@ -498,6 +514,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=benchmark_weight,
                 verbose=False,
                 progress_callback=on_progress,
                 validation_ratio=validation_ratio,
@@ -515,6 +532,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=benchmark_weight,
                 trade_start_index=len(train_bars),
                 min_trades=min_trades,
                 max_trades=max_trades,
@@ -554,6 +572,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         transaction_cost: float,
         drawdown_penalty: float,
         trade_penalty: float,
+        benchmark_weight: float,
         validation_ratio: float,
         validation_weight: float,
         overfit_penalty: float,
@@ -647,6 +666,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=benchmark_weight,
                 verbose=False,
                 progress_callback=on_progress,
                 validation_ratio=validation_ratio,
@@ -666,6 +686,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=benchmark_weight,
                 trade_start_index=trade_start_index,
                 min_trades=min_trades,
                 max_trades=max_trades,
@@ -762,6 +783,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         transaction_cost: float,
         drawdown_penalty: float,
         trade_penalty: float,
+        benchmark_weight: float,
     ) -> dict[str, object]:
         current_capital = initial_capital
         stitched_equity: list[dict[str, float | str]] = []
@@ -783,6 +805,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=float(config.get("benchmark_weight", benchmark_weight)),
                 verbose=False,
                 validation_ratio=float(config["validation_ratio"]),
                 validation_weight=float(config["validation_weight"]),
@@ -801,6 +824,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=float(config.get("benchmark_weight", benchmark_weight)),
                 trade_start_index=trade_start_index,
                 min_trades=int(config["min_trades"]),
                 max_trades=config["max_trades"],
@@ -886,6 +910,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         transaction_cost: float,
         drawdown_penalty: float,
         trade_penalty: float,
+        benchmark_weight: float,
         validation_ratio: float,
         validation_weight: float,
         overfit_penalty: float,
@@ -923,6 +948,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             min_trades=min_trades,
             max_trades=max_trades,
             excess_trade_penalty=excess_trade_penalty,
+            benchmark_weight=benchmark_weight,
         )
 
         self.write_event(
@@ -966,6 +992,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 transaction_cost=transaction_cost,
                 drawdown_penalty=drawdown_penalty,
                 trade_penalty=trade_penalty,
+                benchmark_weight=benchmark_weight,
             )
             results.append(result)
             if best_result is None or result["summary"]["robust_score"] > best_result["summary"]["robust_score"]:

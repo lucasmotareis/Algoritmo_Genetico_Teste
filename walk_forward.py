@@ -70,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transaction-cost", type=float, default=0.0005, help="Custo por ordem. 0.0005 = 0.05 pct.")
     parser.add_argument("--drawdown-penalty", type=float, default=1.5, help="Penalidade de drawdown usada no fitness.")
     parser.add_argument("--trade-penalty", type=float, default=0.0005, help="Penalidade por trade usada no fitness.")
+    parser.add_argument("--benchmark-weight", type=float, default=0.35, help="Peso para premiar/penalizar retorno contra buy and hold.")
     parser.add_argument("--validation-ratio", type=float, default=0.2, help="Parte final do treino usada como validacao interna anti-overfitting.")
     parser.add_argument("--validation-weight", type=float, default=0.65, help="Peso da validacao interna na nota robusta.")
     parser.add_argument("--overfit-penalty", type=float, default=1.5, help="Penalidade quando treino supera validacao por margem grande.")
@@ -152,6 +153,7 @@ def write_windows_csv(path: Path, bars, results: list[WindowResult]) -> None:
                 "test_win_rate",
                 "test_profit_factor",
                 "buy_and_hold",
+                "trade_mode",
                 "sma_short",
                 "sma_long",
                 "rsi_period",
@@ -189,6 +191,7 @@ def write_windows_csv(path: Path, bars, results: list[WindowResult]) -> None:
                     f"{item.test_result.win_rate:.8f}",
                     profit_factor,
                     f"{item.test_result.buy_and_hold_return:.8f}",
+                    "long_short" if item.genes.trade_mode == 1 else "long_only",
                     item.genes.sma_short,
                     item.genes.sma_long,
                     item.genes.rsi_period,
@@ -218,6 +221,7 @@ def write_trades_csv(path: Path, results: list[WindowResult]) -> None:
             [
                 "window",
                 "entry_date",
+                "side",
                 "exit_date",
                 "entry_price",
                 "exit_price",
@@ -232,6 +236,7 @@ def write_trades_csv(path: Path, results: list[WindowResult]) -> None:
                     [
                         item.window.number,
                         trade.entry_date,
+                        trade.side,
                         trade.exit_date,
                         f"{trade.entry_price:.6f}",
                         f"{trade.exit_price:.6f}",
@@ -294,6 +299,7 @@ def main() -> None:
             min_trades=args.min_trades,
             max_trades=args.max_trades or None,
             excess_trade_penalty=args.excess_trade_penalty,
+            benchmark_weight=args.benchmark_weight,
         )
         context_bars = bars[window.train_start : window.test_end]
         trade_start_index = window.test_start - window.train_start
@@ -308,6 +314,7 @@ def main() -> None:
             min_trades=args.min_trades,
             max_trades=args.max_trades or None,
             excess_trade_penalty=args.excess_trade_penalty,
+            benchmark_weight=args.benchmark_weight,
         )
 
         results.append(

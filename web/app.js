@@ -335,6 +335,7 @@ function configParamsText(config) {
     `valid=${formatNumber(config.validation_ratio, 2)}`,
     `peso=${formatNumber(config.validation_weight, 2)}`,
     `overfit=${formatNumber(config.overfit_penalty, 2)}`,
+    `b&h=${formatNumber(config.benchmark_weight, 2)}`,
     `min=${config.min_trades}`,
     `max=${maxTrades}`,
   ].join(" | ");
@@ -396,7 +397,7 @@ function handleConfigResult(event) {
 
 function renderTrades(trades) {
   if (!trades.length) {
-    fields.tradeRows.innerHTML = '<tr><td colspan="5">Sem trades fora da amostra.</td></tr>';
+    fields.tradeRows.innerHTML = '<tr><td colspan="6">Sem trades fora da amostra.</td></tr>';
   } else {
     fields.tradeRows.innerHTML = trades
       .map((trade) => {
@@ -404,6 +405,7 @@ function renderTrades(trades) {
         const windowText = trade.window ? `J${trade.window} ` : "";
         return `<tr>
           <td>${windowText}${escapeHtml(trade.entry_date)}</td>
+          <td>${escapeHtml(trade.side || "-")}</td>
           <td>${escapeHtml(trade.exit_date)}</td>
           <td class="${returnClass}">${formatPct(trade.return_pct)}</td>
           <td>${trade.hold_days}</td>

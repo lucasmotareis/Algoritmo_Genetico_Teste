@@ -64,6 +64,7 @@ step-size=126
 validation-ratio=0.20
 validation-weight=0.65
 overfit-penalty=1.5
+benchmark-weight=0.35
 min-trades=2
 max-trades=30
 ```
@@ -130,6 +131,7 @@ python .\algoritmo_genetico_ouro.py --csv .\GC-F.csv --population 60 --generatio
 Cada individuo do algoritmo genetico representa uma estrategia:
 
 ```text
+trade_mode     long_only ou long_short
 sma_short      janela da media movel curta
 sma_long       janela da media movel longa
 rsi_period     periodo do RSI
@@ -152,7 +154,7 @@ max_hold_days  limite maximo de dias posicionado
 
 ## Regra de entrada e saida
 
-Entrada:
+Entrada comprada:
 
 ```text
 compra quando a quantidade de sinais positivos chega em min_entry_signals
@@ -167,6 +169,13 @@ EMA curta > EMA longa
 MACD > sinal do MACD
 ```
 
+Entrada vendida:
+
+```text
+se trade_mode=long_short, vende quando os sinais negativos superam os positivos
+e chegam em min_entry_signals
+```
+
 Saida:
 
 ```text
@@ -175,6 +184,7 @@ take profit
 stop ou alvo dinamico baseado em ATR
 maximo de dias na operacao
 venda quando a quantidade de sinais negativos chega em min_exit_signals
+compra para encerrar short quando os sinais positivos chegam em min_exit_signals
 ```
 
 Os sinais negativos possiveis sao:
@@ -193,10 +203,10 @@ no inicio da janela fora da amostra.
 ## Fitness
 
 A funcao de fitness favorece retorno, mas penaliza drawdown, excesso de
-operacoes e sinais de overfitting:
+operacoes, perda contra buy and hold e sinais de overfitting:
 
 ```text
-score = retorno_validacao - penalidade_drawdown - penalidade_trades - penalidade_overfit + bonus_consistencia
+score = retorno_validacao + peso_buy_hold * vs_buy_hold - penalidade_drawdown - penalidade_trades - penalidade_overfit + bonus_consistencia
 ```
 
 Para reduzir overfitting, o AG agora divide o proprio treino em duas partes:
@@ -216,6 +226,7 @@ Parametros anti-overfitting principais:
 validation-ratio    parte final do treino usada como validacao interna
 validation-weight   peso da validacao na nota robusta
 overfit-penalty     penalidade quando treino supera validacao por margem grande
+benchmark-weight    peso para premiar ou penalizar a diferenca contra buy and hold
 min-trades          minimo de trades para a estrategia ser considerada valida
 max-trades          maximo de trades antes de penalizar excesso; 0 desativa
 ```
