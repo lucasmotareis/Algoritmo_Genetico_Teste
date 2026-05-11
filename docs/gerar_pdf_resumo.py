@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from html import escape
 from pathlib import Path
 
@@ -138,20 +139,31 @@ def page_footer(canvas, doc):
     canvas.restoreState()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Gera PDF simples a partir de Markdown.")
+    parser.add_argument("--source", type=Path, default=SOURCE, help="Arquivo Markdown de entrada.")
+    parser.add_argument("--output", type=Path, default=OUTPUT, help="Arquivo PDF de saida.")
+    parser.add_argument("--title", default="Guia simples do sistema AG Ouro", help="Titulo interno do PDF.")
+    return parser.parse_args()
+
+
 def main() -> None:
-    markdown = SOURCE.read_text(encoding="utf-8")
+    args = parse_args()
+    source = args.source if args.source.is_absolute() else BASE_DIR / args.source
+    output = args.output if args.output.is_absolute() else BASE_DIR / args.output
+    markdown = source.read_text(encoding="utf-8")
     doc = SimpleDocTemplate(
-        str(OUTPUT),
+        str(output),
         pagesize=A4,
         leftMargin=2 * cm,
         rightMargin=2 * cm,
         topMargin=1.7 * cm,
         bottomMargin=1.8 * cm,
-        title="Guia simples do sistema AG Ouro",
+        title=args.title,
         author="Codex",
     )
     doc.build(build_story(markdown), onFirstPage=page_footer, onLaterPages=page_footer)
-    print(OUTPUT)
+    print(output)
 
 
 if __name__ == "__main__":
