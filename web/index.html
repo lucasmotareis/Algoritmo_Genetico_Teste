@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AG Ouro Monitor</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>AG Ouro Monitor</h1>
+        <p id="statusText">Pronto</p>
+      </div>
+      <div class="run-actions">
+        <button id="startButton" class="primary" type="submit" form="runForm">
+          <span aria-hidden="true">&#9654;</span>
+          Iniciar
+        </button>
+        <button id="stopButton" type="button" disabled>
+          <span aria-hidden="true">&#9632;</span>
+          Parar
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="controls-band" aria-label="Parametros">
+        <form id="runForm" class="controls-grid">
+          <label>
+            Execucao
+            <select name="run_mode" id="runModeSelect">
+              <option value="simple">Treino/Teste</option>
+              <option value="walk_forward" selected>Walk-forward</option>
+              <option value="optimize_config">Otimizar configuracao</option>
+            </select>
+          </label>
+          <label>
+            Fonte
+            <select name="source" id="sourceSelect">
+              <option value="ticker" selected>Yahoo Finance</option>
+              <option value="demo">Demo</option>
+              <option value="csv">CSV</option>
+            </select>
+          </label>
+          <label>
+            Ticker
+            <input name="ticker" value="GC=F" autocomplete="off">
+          </label>
+          <label>
+            Inicio
+            <input name="start" type="date" value="2020-01-01">
+          </label>
+          <label>
+            Fim
+            <input name="end" type="date" value="2024-12-31">
+          </label>
+          <label>
+            CSV
+            <input name="csv" placeholder="GC-F.csv" autocomplete="off">
+          </label>
+          <label>
+            Populacao
+            <input name="population" type="number" value="40" min="2" max="500">
+          </label>
+          <label>
+            Geracoes
+            <input name="generations" type="number" value="100" min="1" max="500">
+          </label>
+          <label class="simple-option">
+            Treino
+            <input name="train_ratio" type="number" value="0.70" min="0.55" max="0.90" step="0.05">
+          </label>
+          <label class="walk-option">
+            Treino WF
+            <input name="train_size" type="number" value="756" min="250" max="5000">
+          </label>
+          <label class="walk-option">
+            Teste WF
+            <input name="test_size" type="number" value="126" min="20" max="1000">
+          </label>
+          <label class="walk-option">
+            Passo WF
+            <input name="step_size" type="number" value="126" min="1" max="1000">
+          </label>
+          <label class="walk-option">
+            Modo WF
+            <select name="walk_mode">
+              <option value="rolling" selected>Rolling</option>
+              <option value="expanding">Expanding</option>
+            </select>
+          </label>
+          <label>
+            Capital
+            <input name="initial_capital" type="number" value="10000" min="100" step="100">
+          </label>
+          <label>
+            Custo
+            <input name="transaction_cost" type="number" value="0.0005" min="0" max="0.05" step="0.0001">
+          </label>
+          <label>
+            Validacao
+            <input name="validation_ratio" type="number" value="0.20" min="0" max="0.5" step="0.05">
+          </label>
+          <label>
+            Peso valid.
+            <input name="validation_weight" type="number" value="0.65" min="0" max="1" step="0.05">
+          </label>
+          <label>
+            Penal. overfit
+            <input name="overfit_penalty" type="number" value="1.5" min="0" max="10" step="0.1">
+          </label>
+          <label>
+            Min trades
+            <input name="min_trades" type="number" value="2" min="0" max="10000">
+          </label>
+          <label>
+            Max trades
+            <input name="max_trades" type="number" value="30" min="0" max="100000">
+          </label>
+          <label class="optimize-option">
+            Configs
+            <input name="config_trials" type="number" value="8" min="2" max="12">
+          </label>
+        </form>
+      </section>
+
+      <section class="metrics-grid" aria-label="Metricas">
+        <article class="metric">
+          <span>Ultimo fechamento</span>
+          <strong id="lastClose">-</strong>
+        </article>
+        <article class="metric">
+          <span>Geracao</span>
+          <strong id="generation">0/0</strong>
+        </article>
+        <article class="metric">
+          <span>Individuos testados</span>
+          <strong id="evaluated">0</strong>
+        </article>
+        <article class="metric">
+          <span>Melhor score</span>
+          <strong id="bestFitness">-</strong>
+        </article>
+        <article class="metric">
+          <span>Retorno OOS</span>
+          <strong id="testReturn">-</strong>
+        </article>
+        <article class="metric">
+          <span>Drawdown OOS</span>
+          <strong id="testDrawdown">-</strong>
+        </article>
+      </section>
+
+      <section class="split-layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Preco real carregado</h2>
+            <span id="marketRange">-</span>
+          </div>
+          <canvas id="priceChart" width="860" height="260"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Score por geracao/config</h2>
+            <span id="runRange">-</span>
+          </div>
+          <canvas id="fitnessChart" width="860" height="260"></canvas>
+        </article>
+      </section>
+
+      <section class="split-layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Capital fora da amostra</h2>
+            <span id="testSummary">-</span>
+          </div>
+          <canvas id="equityChart" width="860" height="260"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Melhores genes</h2>
+            <span id="genesBadge">-</span>
+          </div>
+          <pre id="genesText">Aguardando execucao.</pre>
+        </article>
+      </section>
+
+      <section class="wide-layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Configuracoes testadas</h2>
+            <span id="configCount">0 configs</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Config</th>
+                  <th>Score</th>
+                  <th>Retorno</th>
+                  <th>Drawdown</th>
+                  <th>Buy hold</th>
+                  <th>Vs B&H</th>
+                  <th>Janelas +</th>
+                  <th>Trades</th>
+                  <th>Classificacao</th>
+                  <th>Parametros</th>
+                </tr>
+              </thead>
+              <tbody id="configRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="wide-layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Janelas walk-forward</h2>
+            <span id="windowCount">0 janelas</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Janela</th>
+                  <th>Treino</th>
+                  <th>Teste</th>
+                  <th>Retorno</th>
+                  <th>Capital</th>
+                  <th>Drawdown</th>
+                  <th>Trades</th>
+                  <th>Buy hold</th>
+                </tr>
+              </thead>
+              <tbody id="windowRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="table-layout">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Geracoes</h2>
+            <span id="generationCount">0 linhas</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Janela/Geracao</th>
+                  <th>Avaliados</th>
+                  <th>Score</th>
+                  <th>Retorno</th>
+                  <th>Drawdown</th>
+                  <th>Trades</th>
+                </tr>
+              </thead>
+              <tbody id="generationRows"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Trades fora da amostra</h2>
+            <span id="tradeCount">0 trades</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Entrada</th>
+                  <th>Saida</th>
+                  <th>Retorno</th>
+                  <th>Dias</th>
+                  <th>Motivo</th>
+                </tr>
+              </thead>
+              <tbody id="tradeRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
